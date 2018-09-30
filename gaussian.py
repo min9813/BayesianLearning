@@ -6,6 +6,8 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import math
 import sys
+import argparse
+
 
 sns.set()
 
@@ -217,6 +219,21 @@ def draw_3d_distribution(data_size, parametors,
         return ax
 
 
+parser = argparse.ArgumentParser(
+    usage="""demonstration of Bayesian inference by gaussian. You can decide which parametor, mean or sigma is known, and start inference.
+If you choose both parametor to be known, this program work as only sigma to bw known.""",
+    description="""This file is\
+ used to get 3D image, if you just want to try Bayesian Inference, you should use gaussian.ipynb""")
+parser.add_argument("-m", "--mean",
+                    help="is mean value known",
+                    action="store_true")
+parser.add_argument("-s", "--sigma",
+                    help="is sigma value known", action="store_true")
+parser.add_argument("-d", "--datasize",
+                    help="size of real data", type=int, default=100)
+args = parser.parse_args()
+
+
 if __name__ == "__main__":
     real_mu = np.array([3, 5])
     real_sigma_inv = np.array([[10, 2],
@@ -227,8 +244,10 @@ if __name__ == "__main__":
 
     pre_mu_loc = np.array([0, 0])
     pre_mu_beta = 1
+    pre_mu_scale_inv = np.array([[1, 0],
+                                 [0, 1]])
 
-    data_size = 100
+    data_size = args.datasize
     D = 2
 
     ax = draw_3d_distribution(data_size, (real_mu, real_sigma_inv),
@@ -238,54 +257,104 @@ if __name__ == "__main__":
                               need_data=False)
 
     # 事前予測分布
-    est_data_mu = pre_mu_loc
-    est_data_nu = 1 - D + pre_sigma_nu
-    est_data_lam = (est_data_nu) * pre_mu_beta / \
-        (1 + pre_mu_beta) * pre_sigma_w
 
-    ax1 = draw_3d_distribution(data_size, (est_data_mu, est_data_lam, est_data_nu),
-                               ax=ax, cmap="blue",
-                               distribution="student",
-                               title="pre-estimated distribution")
+    if args.sigma:
+        _m1 = np.linalg.inv(real_sigma_inv)
+        _m2 = np.linalg.inv(pre_mu_scale_inv)
+        est_data_sigma_inv = np.linalg.inv(_m1 + _m2)
+        est_data_mu = pre_mu_loc
+        ax1 = draw_3d_distribution(data_size, (est_data_mu, est_data_sigma_inv),
+                                   cmap="blue",
+                                   ax=ax,
+                                   title="pre-estimated distribution")
 
-    ax = draw_3d_distribution(data_size, (real_mu, real_sigma_inv),
-                              distribution="norm",
-                              cmap="gist_gray_r",
-                              seed=3,
-                              need_data=False)
+        ax = draw_3d_distribution(data_size, (real_mu, real_sigma_inv),
+                                  distribution="norm",
+                                  cmap="gist_gray_r",
+                                  seed=3,
+                                  need_data=False)
+        est_mu_scale_inv = data_size * real_sigma_inv + pre_mu_scale_inv
 
-    x_data = np.random.multivariate_normal(
-        mean=real_mu, cov=np.linalg.inv(real_sigma_inv), size=data_size)
-    # x_data.shape=(data_size,D)
+        x_data = np.random.multivariate_normal(
+            mean=real_mu, cov=np.linalg.inv(real_sigma_inv), size=data_size)
 
-    # 平均のパラメーター更新
-    est_mu_beta = data_size + pre_mu_beta
-    est_mu_loc = (np.sum(x_data, axis=0) +
-                  pre_mu_beta * pre_mu_loc) / est_mu_beta
+        _m1 = np.linalg.inv(est_mu_scale_inv)
+        _m2 = np.dot(real_sigma_inv, np.sum(x_data, axis=0).reshape(-1, 1)
+                     ) + np.dot(pre_mu_scale_inv, pre_mu_loc.reshape(-1, 1))
+        est_mu_loc = np.dot(_m1, _m2)
 
-    # 精度のパラメーター更新
-    est_sigma_nu = data_size + pre_sigma_nu
-    _m1 = np.dot(x_data.T, x_data)
-    _m2 = pre_mu_beta * np.dot(pre_mu_loc.reshape(D, -1),
-                               pre_mu_loc.reshape(-1, D))
-    _m3 = -est_mu_beta * np.dot(est_mu_loc.reshape(D, -1),
-                                est_mu_loc.reshape(-1, D))
-    est_sigma_w = np.linalg.inv(_m1 + _m2 + _m3 + np.linalg.inv(pre_sigma_w))
+        _m1 = np.linalg.inv(real_sigma_inv)
+        _m2 = np.linalg.inv(est_mu_scale_inv)
+        est_data_sigma_inv = np.linalg.inv(_m1 + _m2)
+        est_data_mu = est_mu_loc
 
-    print("---------")
-    print("estimated value:")
-    print("m=", est_mu_loc)
-    print("β=", est_mu_beta)
-    print("ν=", est_sigma_nu)
-    print("W=", est_sigma_w)
-    print("|W|=", np.linalg.det(est_sigma_w))
+        ax = draw_3d_distribution(data_size, (est_data_mu.reshape(-1), est_data_sigma_inv),
+                                  cmap="orange",
+                                  ax=ax,
+                                  title="post-estimated distribution")
+    else:
+        est_data_nu = 1 - D + pre_sigma_nu
+        if args.mean:
+            est_data_mu = real_mu
+            est_data_lam = est_data_nu * pre_sigma_w
+        else:
+            est_data_mu = pre_mu_loc
+            est_data_lam = (est_data_nu) * pre_mu_beta / \
+                (1 + pre_mu_beta) * pre_sigma_w
 
-    est_data_mu = est_mu_loc
-    est_data_nu = 1 - D + est_sigma_nu
-    est_data_lam = (est_data_nu) * est_mu_beta * \
-        est_sigma_w / (1 + est_mu_beta)
-    print(np.linalg.det(est_data_lam))
-    ax = draw_3d_distribution(data_size, (est_data_mu, est_data_lam,
-                                          est_data_nu), ax=ax, cmap="orange", distribution="student", title="post-estimate distribution")
+        ax1 = draw_3d_distribution(data_size, (est_data_mu, est_data_lam, est_data_nu),
+                                   ax=ax, cmap="blue",
+                                   distribution="student",
+                                   title="pre-estimated distribution")
+
+        ax = draw_3d_distribution(data_size, (real_mu, real_sigma_inv),
+                                  distribution="norm",
+                                  cmap="gist_gray_r",
+                                  seed=3,
+                                  need_data=False)
+
+        x_data = np.random.multivariate_normal(
+            mean=real_mu, cov=np.linalg.inv(real_sigma_inv), size=data_size)
+        # x_data.shape=(data_size,D)
+
+        if args.mean:
+            est_data_mu = real_mu
+            print("x_data shape:", x_data.shape)
+            est_sigma_w = np.linalg.inv(
+                np.dot((x_data - real_mu).T, x_data - real_mu) + np.linalg.inv(pre_sigma_w))
+            est_sigma_nu = data_size + pre_sigma_nu
+            print("w shape:", est_sigma_w.shape)
+
+            est_data_lam = (1 - D + est_sigma_nu) * est_sigma_w
+            est_data_nu = 1 - D + est_sigma_nu
+        else:
+            # 平均のパラメーター更新
+            est_mu_beta = data_size + pre_mu_beta
+            est_mu_loc = (np.sum(x_data, axis=0) +
+                          pre_mu_beta * pre_mu_loc) / est_mu_beta
+
+            # 精度のパラメーター更新
+            est_sigma_nu = data_size + pre_sigma_nu
+            _m1 = np.dot(x_data.T, x_data)
+            _m2 = pre_mu_beta * np.dot(pre_mu_loc.reshape(D, -1),
+                                       pre_mu_loc.reshape(-1, D))
+            _m3 = -est_mu_beta * np.dot(est_mu_loc.reshape(D, -1),
+                                        est_mu_loc.reshape(-1, D))
+            est_sigma_w = np.linalg.inv(
+                _m1 + _m2 + _m3 + np.linalg.inv(pre_sigma_w))
+
+            print("---------")
+            print("estimated value:")
+            print("m=", est_mu_loc)
+            print("β=", est_mu_beta)
+            print("ν=", est_sigma_nu)
+            print("W=", est_sigma_w)
+
+            est_data_mu = est_mu_loc
+            est_data_nu = 1 - D + est_sigma_nu
+            est_data_lam = (est_data_nu) * est_mu_beta * \
+                est_sigma_w / (1 + est_mu_beta)
+        ax = draw_3d_distribution(data_size, (est_data_mu, est_data_lam,
+                                              est_data_nu), ax=ax, cmap="orange", distribution="student", title="post-estimate distribution")
 
     plt.show()
